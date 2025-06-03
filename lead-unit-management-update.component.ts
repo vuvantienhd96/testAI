@@ -259,14 +259,165 @@ export class LeadUnitManagementUpdateComponent extends BaseComponent implements 
   }
 
   public doSave() {
-    this.isSubmitted = true;
     this.formModal.patchValue({
-      description: this.formModal.get("description")?.value?.trim()
+      note: this.formModal.get('note')?.value?.trim()
     });
 
-    if(this.formModal.valid){
-      if((this.mode === 'add' || this.mode === 'edit') && this.listDataChecked.length <=0){
-        this.toastrCustom.warning("Trường bắt buộc nhập với loại đơn vị");
+    if (this.formModal.invalid) {
+      // Handle invalid form
+      return;
+    }
+
+    if ((this.mode === 'add' || this.mode === 'edit') && this.listDataChecked.length <= 0) {
+      this.toastrCustom.warning('Trường bắt buộc nhập với loại đơn vị');
+      return;
+    }
+
+    const payload = this.leadUnitManagementService.buildLeadUnitPayload(this.formModal.value, this.listDataChecked, this.mode, this.dataPath);
+    this.leadUnitManagementService.saveLeadUnitUpdate(payload, this.mode).subscribe({
+      next: () => {
+        this.toastrCustom.success('Lưu thành công.');
+        this.modalRef.close(true); // Close modal on success
+      },
+      error: (err) => {
+        // Error handling is done in the service, but you can add specific handling here if needed
+      }
+    });
+  };
+
+   // buildPayloadToSend(a: any[], b: any[]) {
+  //   const aIds = new Set(a.map(item => item.organizationId));
+  //   const bIds = new Set(b.map(item => item.organizationId));
+  //   const result: any[] = [];
+
+  //   // ✅ TH1: item từ b mà không tồn tại trong a => Thêm mới
+  //   for (const itemB of b) {
+  //     if (!aIds.has(itemB.organizationId)) {
+  //       result.push({
+  //         organizationId: itemB.organizationId,
+  //         deleted: 0
+  //       });
+  //     }
+  //   }
+
+  //   // ✅ TH2: item từ a mà không tồn tại trong b => Mark là đã xóa (deleted = 1)
+  //   for (const itemA of a) {
+  //     if (!bIds.has(itemA.organizationId)) {
+  //       result.push({
+  //         id: itemA.id,
+  //         organizationId: itemA.organizationId,
+  //         deleted: itemA.deleted === 0 ? 0 : 1
+  //       });
+  //     }
+  //   }
+
+  //   return result;
+  // }
+
+  public doSaveToAdd(){
+    this.isSubmitted = true;
+    if(this.formModal.valid && this.mode === 'add'){
+        if(this.listDataChecked.length <=0){
+          this.toastrCustom.warning("Trường bắt buộc nhập với loại đơn vị");
+          return;
+        }
+      this.formModal.patchValue({
+        description: this.formModal.get("note")?.value?.trim()
+      });
+      this.addData({
+        ...this.formModal.value,
+        //budgetGroups: this.listBuggetGroup.filter((item: Budget) => this.formModal.value.budgetGroups.includes(item.code)),
+        organizationDetails: [...this.listDataChecked],
+        type: 'saveToAdd'
+      }); // Send data to the parent
+      this.listDataChecked = [];
+      this.listDataOriginDrop = [];
+      this.checkedTb = [];
+      this.formModal.reset(); // Reset form for new input
+      this.isSubmitted = false;
+      this.isSavecontinue = true;
+    }
+  };
+
+  private getDefaultColumn() {
+    const df: MBTableConfig =
+      {
+        headers: [
+          {
+            title: 'Mã đơn vị',
+            field: 'code',
+            width: 50,
+            tdClassList: ['text-center'],
+            thClassList: ['text-center'],
+
+          },
+          {
+            title: 'Tên đơn vị',
+            field: 'name',
+            width: 50,
+            tdClassList: ['text-center'],
+            thClassList: ['text-center'],
+            listOfFilter: this.listDataOrigin.map(res => {
+             return {
+               name: res.name,
+               code: res.code
+             }
+            }),
+            filterFn: (list: string[], item: any) => list.some(name => item.name.indexOf(name) !== -1)
+          },
+        ],
+        total: 0,
+        needScroll: true,
+        loading: false,
+        size: 'small',
+        pageIndex: 1,
+        pageSize: this.pagination.pageSize,
+        showFrontPagination: false,
+        widthIndex: '15px',
+        widthCheckboxTH: '10px',
+        showCheckbox: true,
+
+      };
+
+    return df;
+  }
+  private getDefaultColumnDrop() {
+    const df: MBTableConfig =
+      {
+        headers: [
+          {
+            title: 'Mã đơn vị',
+            field: 'code',
+            width: 50,
+            tdClassList: ['text-center'],
+            thClassList: ['text-center'],
+
+          },
+          {
+            title: 'Tên đơn vị',
+            field: 'name',
+            width: 50,
+            tdClassList: ['text-center'],
+            thClassList: ['text-center'],
+          },
+        ],
+        total: 0,
+        needScroll: true,
+        loading: false,
+        size: 'small',
+        pageIndex: 1,
+        pageSize: this.pagination.pageSize,
+        showFrontPagination: false,
+        widthIndex: '15px',
+        widthCheckboxTH: '10px',
+        showCheckbox: false,
+
+      };
+
+    return df;
+  }
+
+}
         return;
       }
       if(this.mode === 'add'){

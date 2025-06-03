@@ -1,7 +1,7 @@
 import {Component, Injector, OnInit, TemplateRef, ViewChild} from '@angular/core';
 import {FormGroup} from "@angular/forms";
 import {BaseComponent} from "@pams-fe/shared/common/base-component";
-import {Pagination, TableConfig} from "@pams-fe/shared/data-access/models";
+import {PaginatedResponse, Pagination, TableConfig} from "@pams-fe/shared/data-access/models";
 import {Constant} from "@pams-fe/budget/data-access/models/budget-plan";
 import {FunctionCode, SessionKey, userConfig} from "@pams-fe/shared/common/constants";
 import {LeadUnitManagementService} from "../data-access/services/lead-unit-management.service";
@@ -19,8 +19,9 @@ import {ListKtnbRequisitionDoc, User} from "@pams-fe/payment/data-access/models/
 import {arrayBufferToBase64} from "@pams-fe/shared/common/utils";
 import {convertFile} from "@pams-fe/payment/feature/broker-commission";
 import {ReqVatOutDetail} from "../../../../../../payment/feature/secured-asset-invoice/secured-asset-invoice-list/src/lib/models/interface";
-import {switchMap, takeUntil, tap} from "rxjs";
+import {catchError, finalize, Observable, of, switchMap, takeUntil, tap} from "rxjs";
 import {LeadUnitManagementUpdateComponent} from "../lead-unit-management-update/lead-unit-management-update.component";
+
 
 @Component({
   selector: 'pams-fe-lead-unit-management',
@@ -30,8 +31,8 @@ import {LeadUnitManagementUpdateComponent} from "../lead-unit-management-update/
 export class LeadUnitManagementComponent extends BaseComponent implements OnInit {
 
   formSearch!: FormGroup;
-  listBuggetGroup : Budget[] = [];
-  listDataTransaction: ContentItem[] = [];
+  listBuggetGroup$!: Observable<Budget[]>;
+  listDataTransaction$!: Observable<PaginatedResponse<ContentItem>>;
   listStatus: any = [{
     label: 'Còn hiệu lực',
     value: 1,
@@ -54,6 +55,7 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
     size: this.limit,
     page: 0
   };
+  isLoading = false;
 
   private readonly textCenter = 'text-center';
   private readonly textRight = 'text-right';
@@ -70,7 +72,6 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
   public baseUrl = environment.pamsCommon;
   public urlDownloadImportInfo =
     'v1.0/risk-focal-units/template';
-  public urlImportInfo = 'v1.0/risk-focal-units/import';
   private listDataInvoiceList: paramUpdatePush  | undefined= undefined;
   public isShowLogPopup = false;
 
@@ -92,10 +93,7 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
 
   ngOnInit(): void {
     this.user = JSON.parse(localStorage.getItem(SessionKey.CURRENCY_USER) || '');
-    this.initTable();
-    this.leadUnitManagementService.budgetCommon().subscribe(res => {
-      this.listBuggetGroup = res;
-    }, err => {
+    this.listBuggetGroup$ = this.leadUnitManagementService.budgetCommon().pipe(catchError(err => {
       this.toastrCustom.error("Đã có lỗi xảy ra vui lòng liên hệ admin!")
     })
     this.basicSearch();
@@ -142,7 +140,7 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
   public importDataInfo(data: any) {
     this.bineArray = '';
     if(!data?.data?.errorFile){
-      const param = {
+      const param = { // This param is for the confirmation modal, not for the API call
         key: data?.key,
         // name: data?.unitName,
         title: 'Xác nhận ',
@@ -162,9 +160,12 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
         nzFooter: null,
       });
       this.modalRef.afterClose.subscribe((e) => {
-        if (e) {
-          this.confirmSource(data);
+ if (e) {
+ this.leadUnitManagementService.processImportData(data).subscribe({
+ next: () => { this.toastrCustom.success(this.translate.instant('Thực hiện verify file và import dữ liệu vào hệ thống thành công.')); this.basicSearch(); },
+ error: (err) => { /* Error is handled by service */ }
         }
+
       });
     }else if(data.data.errorFile){
       this.isShowLogPopup = true;
@@ -189,12 +190,14 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
         page: 0 // reset page
       }
     };
-    this.leadUnitManagementService.searchBasic(this.paramSearchTransaction).subscribe(res => {
-      this.listDataTransaction = res.content;
-      this.tableConfigTransaction.total = res.totalElements;
-      this.tableConfigTransaction.pageIndex = this.paramSearchTransaction.page + 1;
-    }, err=>{
-      this.toastrCustom.error("Đã có lỗi xảy ra vui lòng liên hệ admin!")
+ this.isLoading = true;
+ this.listDataTransaction$ = this.leadUnitManagementService.searchBasic(this.paramSearchTransaction).pipe(
+ tap(res => {
+        this.tableConfigTransaction.total = res.totalElements;
+        this.tableConfigTransaction.pageIndex = this.paramSearchTransaction.page + 1;
+ }),
+      finalize(() => this.isLoading = false)
+ )
     })
   }
 
@@ -244,7 +247,7 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
     });
     this.modalRef.afterClose.subscribe((e) => {
       if (e) {
-        this.deleteAfterConfirm(data);
+ this.leadUnitManagementService.processDeleteAction(data.id).subscribe({ next: () => { this.toastrCustom.success(this.translate.instant('Xóa bản ghi thành công.')); this.basicSearch(); }, error: (err) => { /* Error is handled by service */ } });
       }
     });
   }
@@ -252,8 +255,8 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
   exportExel() {
 
     let params = {
-      search:this.formSearch.getRawValue().search ? this.formSearch.getRawValue().search : "",
-      status: this.formSearch.getRawValue().status ? this.formSearch.getRawValue().status : "",
+ search:this.formSearch.getRawValue().search ? this.formSearch.getRawValue().search : "",
+ status: this.formSearch.getRawValue().status ? this.formSearch.getRawValue().status : "",
     }
     this.leadUnitManagementService.export(params).subscribe({
       next: (res) => {
@@ -270,9 +273,7 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
   };
 
   exportExelError(){
-// Remove data URI prefix if exists
-    const base64Data = this.bineArray.replace(/^data:application\/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,/, '');
-
+    this.leadUnitManagementService.processExportError(this.bineArray);
     const byteCharacters = atob(base64Data);
     const byteNumbers = new Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
@@ -284,43 +285,11 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
     const blob = new Blob([byteArray], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
-    const fileName = 'ImportDonViDauMoiLoi.xlsx';
-    saveAs(blob, fileName);
-  }
-
-  deleteAfterConfirm(data: ContentItem) {
-    this.leadUnitManagementService.deleteById(data.id).subscribe({
-      next: (result) => {
-        this.toastrCustom.success(this.translate.instant('Xóa bản ghi thành công.'));
-        this.basicSearch();
-
-      },
-      error: (err) => {
-        let title = "Không thể xóa danh mục";
-        let content = err?.message || err?.error;
-        this.toastrCustom.error(this.translate.instant('Xóa bản ghi không thành công.'));
-       // this.showPopupWarningFail(title, content);
-      }
-    });
-  }
-
-  private confirmSource(data: any){
-    this.leadUnitManagementService.confirmSource(data).subscribe({
-      next: (result) => {
-        this.toastrCustom.success(this.translate.instant('Thực hiện verify file và import dữ liệu vào hệ thống thành công.'));
-        this.basicSearch();
-
-      },
-      error: (err) => {
-        this.toastrCustom.error(this.translate.instant('Thực hiện verify file và import dữ liệu vào hệ thống không thành công.'));
-      }
-    });
   }
 
   private titleString = '';
 
   public add(dataPath?: Partial<ContentItem>, viewEye?: string) {
-    this.titleString = viewEye === 'add' ? 'Thêm thông tin đơn vị đầu mối' : 'Chỉnh sửa đơn vị đầu mối';
     this.modalRef = this.modal.create({
       nzTitle: this.titleString,
       nzContent: LeadUnitManagementUpdateComponent,
@@ -329,51 +298,17 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
       nzCentered: true,
       nzComponentParams: {
         // paramModalInit: this.paramModalInit,
-        // currencyCode: this.form.get('currencyCode').value,
         // digitInfor: this.digitalinfo,
         dataPath,
         viewEye,
         addData: (data: paramUpdatePush) => {
           if(viewEye === 'edit'){
             this.listDataInvoiceList = data; // Append new data
-          }else if(data?.type === 'saveToAdd'){
-            this.listDataInvoiceList = data; // Append new data
-            this.leadUnitManagementService.postSaveRiskFocalUnits({
-             ...data
-            }, 'add').pipe(switchMap(item => {
-              return this.leadUnitManagementService.searchBasic(this.paramSearchTransaction)
-            })).subscribe(res =>{
-              this.listDataTransaction = res.content;
-              this.tableConfigTransaction.total = res.totalElements;
-              this.tableConfigTransaction.pageIndex = this.paramSearchTransaction.page + 1;
-              this.toastrCustom.success("Cập nhập bản ghi thành công");
-            }, err => {
-              this.toastrCustom.error(err?.message && err.status === 400 ? err?.message :  "Đã có lỗi xảy ra vui lòng liên hệ admin!");
-            })
           }else if((viewEye === 'add')){
             this.listDataInvoiceList = data; // Append new data
-
           }
         }
       },
-    });
-    this.modalRef.afterClose.pipe(takeUntil(this.destroy$)).subscribe((el) => {
-      if(el?.type){
-        this.leadUnitManagementService.postSaveRiskFocalUnits(el, el?.type).pipe(switchMap(res => {
-          this.paramSearchTransaction = {
-            ...this.paramSearchTransaction,
-            ...this.formSearch.getRawValue()
-          }
-          return this.leadUnitManagementService.searchBasic(this.paramSearchTransaction)
-        })).subscribe(res =>{
-          this.listDataTransaction = res.content;
-          this.tableConfigTransaction.total = res.totalElements;
-          this.tableConfigTransaction.pageIndex = this.paramSearchTransaction.page + 1;
-          this.toastrCustom.success(el?.type === 'add' ? "Tạo mới bản ghi thành công" : "Cập nhập bản ghi thành công")
-        }, err => {
-          this.toastrCustom.error(err?.message && err.status === 400 ? err?.message :  "Đã có lỗi xảy ra vui lòng liên hệ admin!");
-        });
-      }
     });
     // doSaveToAdd
   }
@@ -386,7 +321,6 @@ export class LeadUnitManagementComponent extends BaseComponent implements OnInit
     this.paramSearchTransaction.size = sizeChange;
     this.searchTransaction(1);
     this.basicSearch();
-  };
 
   private initTable(): void {
     this.tableConfigTransaction = {

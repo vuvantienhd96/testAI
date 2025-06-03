@@ -51,6 +51,7 @@
   </ng-container>
 </nz-modal>
 
+<div *ngIf="isLoading">Đang tải...</div>
 <div class='risk-management-list'>
   <div nz-col nzSpan="12" class="btn-add-risk-management">
 <!--    <ng-container *ngIf='objFunction?.create'>-->
@@ -93,15 +94,16 @@
 <!--                                formControlName="budgetGroupCode"-->
 
 <!--          >-->
-<!--          </mb-select-check-able>-->
-<!--        </div>-->
+          </mb-select-check-able>
+        </div>
+
+
 
           <div nz-col [nzXs]='12' [nzLg]='5' [nzXXl]='5'>
             <mb-select
-              [mbDataSelects]='listStatus'
+              [mbDataSelects]='listStatus | async'
               mbKeyLabel='label'
               mbKeyValue='value'
-              mbPlaceholder="{{ 'Trạng thái' | translate }}"
               [mbOptionHeightPx]='35'
               formControlName='status'
             ></mb-select>
@@ -137,8 +139,7 @@
         <mb-table-merge-cell class="table-contract"
                              (changePageNum)='changePageNum($event)'
                              (changePageSize)="changePageSize($event)"
-                             [tableConfig]="tableConfigTransaction"
-                             [dataList]="listDataTransaction"
+                             [tableConfig]="tableConfigTransaction"                             [dataList]="(listDataTransaction$ | async)?.content"
                              [showQuickJumper]="true"
                              [isScrollHeight]="true"
                              nzScrollHeight="490px"
