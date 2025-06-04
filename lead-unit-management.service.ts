@@ -92,6 +92,15 @@ export class LeadUnitManagementService extends BaseService { // Call the constru
   }
 
 
+  public processImportData(data: any): Observable<any> {
+ return this.post(environment.pamsCommon, 'v1.0/risk-focal-units/import-excel-data', data).pipe(
+      catchError(err => {
+ this.errorHandlingService.handleError(err);
+        return throwError(() => err);
+      })
+ );
+  }
+
   public processDeleteAction(id: number): Observable<any> {
     return this.deleteById(id); // deleteById already has catchError
   }
